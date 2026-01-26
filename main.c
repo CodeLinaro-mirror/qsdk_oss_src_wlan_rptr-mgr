@@ -176,6 +176,11 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 						strlen(cmd), reply,
 						&rlen, NULL);
 
+		if (ret) {
+			rptr_mgr_printf("CHAN_SWITCH: cmd fails ret = %d", ret);
+			return;
+		}
+
 		if (set_bitmap && hw_idx >= 0)
 			rptr_mgr_printf(
 				"sent CHAN_SWITCH once to %s ret=%d "
@@ -240,6 +245,11 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 					       strlen(sw_done),
 					       reply, &rlen,
 					       NULL);
+			if (ret) {
+				rptr_mgr_printf("buf = %d ret = %d",
+							sw_done, ret);
+				return;
+			}
 			rptr_mgr_printf(
 				"no CHAN_SWITCH needed; notified STA %s "
 				"ret=%d msg='%s'",
@@ -257,57 +267,34 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 }
 
 /*
- * ap_sock_handler - Process hostapd MLD or Legacy AP ctrl_iface messages
+ * ap_sock_handler - Process hostapd AP ctrl_iface messages
  *
- * Receives messages from AP VAPs (MLD or Legacy AP) and forwards
- * them to the MLD hostapd ctrl processor for handling.
+ * Receives messages from AP VAPs (legacy or MLD links) and forwards
+ * them to the MLD hostapd ctrl processor for handling. Drain all
+ * pending messages from the control socket to avoid leaving queued
+ * events.
  */
 static void ap_sock_handler(int sock, void *eloop_ctx, void *sock_ctx)
 {
 	struct wpa_ctrl *ctrl = (struct wpa_ctrl *) sock_ctx;
-	char buf[256];
-	size_t len = sizeof(buf) - 1;
-	int res;
 
 	if (!ctrl) {
 		rptr_mgr_printf("ap_sock_handler: NULL ctrl\n");
 		return;
 	}
 
-	res = wpa_ctrl_recv(ctrl, buf, &len);
-	if (res < 0) {
-		perror("wpa_ctrl_recv");
-		return;
-	}
-	buf[len] = '\0';
-	mld_hostapd_ctrl_iface_process(ctrl, buf);
-}
+	while (wpa_ctrl_pending(ctrl) > 0) {
+		char buf[2048];
+		size_t len = sizeof(buf) - 1;
+		int res = wpa_ctrl_recv(ctrl, buf, &len);
 
-/*
- * ap_link_sock_handler - Process hostapd AP link ctrl_iface messages
- *
- * Receives messages from AP VAPs (legacy or MLO links) and forwards
- * them to the MLD hostapd ctrl processor for handling.
- */
-static void ap_link_sock_handler(int sock, void *eloop_ctx, void *sock_ctx)
-{
-	struct wpa_ctrl *ctrl = (struct wpa_ctrl *) sock_ctx;
-	char buf[256];
-	size_t len = sizeof(buf) - 1;
-	int res;
-
-	if (!ctrl) {
-		rptr_mgr_printf("ap_link_sock_handler: NULL ctrl\n");
-		return;
+		if (res < 0) {
+			perror("wpa_ctrl_recv");
+			break;
+		}
+		buf[len] = '\0';
+		mld_hostapd_ctrl_iface_process(ctrl, buf);
 	}
-
-	res = wpa_ctrl_recv(ctrl, buf, &len);
-	if (res < 0) {
-		perror("wpa_ctrl_recv");
-		return;
-	}
-	buf[len] = '\0';
-	mld_hostapd_ctrl_iface_process(ctrl, buf);
 }
 
 /*
@@ -319,24 +306,25 @@ static void ap_link_sock_handler(int sock, void *eloop_ctx, void *sock_ctx)
 static void sta_sock_handler(int sock, void *eloop_ctx, void *sock_ctx)
 {
 	struct wpa_ctrl *ctrl = (struct wpa_ctrl *) sock_ctx;
-	char buf[256];
-	size_t len = sizeof(buf) - 1;
-	int res;
 
 	if (!ctrl) {
 		rptr_mgr_printf("sta_sock_handler: NULL ctrl\n");
 		return;
 	}
 
-	res = wpa_ctrl_recv(ctrl, buf, &len);
-	if (res < 0) {
-		perror("wpa_ctrl_recv");
-		return;
-	}
-	buf[len] = '\0';
-	mld_wpa_s_ctrl_iface_process(buf);
-}
+	while (wpa_ctrl_pending(ctrl) > 0) {
+		char buf[2048];
+		size_t len = sizeof(buf) - 1;
 
+		if (wpa_ctrl_recv(ctrl, buf, &len) == 0) {
+			buf[len] = '\0';
+			mld_wpa_s_ctrl_iface_process(buf);
+		} else {
+			perror("wpa_ctrl_recv");
+			break;
+		}
+	}
+}
 /*
  * parse_kv_int - Helper function for parsing key value for int
  */
@@ -684,11 +672,16 @@ static void disable_aps_for_sta_scan_or_auth(void)
 						       reply,
 						       &rlen,
 						       NULL);
-				rptr_mgr_printf(
+				if (rc) {
+					rptr_mgr_printf("Legacy: DISABLE AP cmd"
+							"failed rc = %d", rc);
+				} else {
+					rptr_mgr_printf(
 					"SCAN-STARTED: DISABLE legacy AP %s "
 					"hw_idx=%d ret=%d\n",
 					cfg.ap_vaps[i].ifname, hw_idx,
 					rc);
+				}
 			}
 		}
 	}
@@ -709,11 +702,16 @@ static void disable_aps_for_sta_scan_or_auth(void)
 					reply,
 					&rlen,
 					NULL);
-				rptr_mgr_printf(
+				if (rc) {
+					rptr_mgr_printf("MLO: DISABLE AP cmd"
+							"failed rc = %d", rc);
+				} else {
+					rptr_mgr_printf(
 					"SCAN-STARTED: DISABLE AP Link %s "
 					"hw_idx=%d ret=%d\n",
 					cfg.ap_vaps[i].links[j].ifname,
 					hw_idx, rc);
+				}
 			}
 		}
 	}
@@ -748,10 +746,15 @@ static void send_rep_ap_enable(int hw_idx, int freq, int width,
 				int ret = wpa_ctrl_request(
 					cfg.ap_vaps[i].ap_ctrl, cmd,
 					strlen(cmd), reply, &rlen, NULL);
-				rptr_mgr_printf(
+				if (ret) {
+					rptr_mgr_printf("Legacy: ENABLE AP cmd"
+							"failed ret = %d", ret);
+				} else {
+					rptr_mgr_printf(
 					"REP_AP_ENABLE -> legacy AP %s "
 					"ret=%d cmd=\"%s\"\n",
 					cfg.ap_vaps[i].ifname, ret, cmd);
+				}
 				return;
 			}
 		} else {
@@ -765,11 +768,16 @@ static void send_rep_ap_enable(int hw_idx, int freq, int width,
 						cfg.ap_vaps[i].links[j].link_ctrl,
 						cmd, strlen(cmd), reply,
 						&rlen, NULL);
-					rptr_mgr_printf(
+					if (ret) {
+						rptr_mgr_printf("MLO: ENABLE AP cmd"
+							"failed ret = %d", ret);
+					} else {
+						rptr_mgr_printf(
 						"REP_AP_ENABLE -> AP Link %s "
 						"ret=%d cmd=\"%s\"\n",
 						cfg.ap_vaps[i].links[j].ifname,
 						ret, cmd);
+					}
 					return;
 				}
 			}
@@ -956,7 +964,8 @@ static void mld_wpa_s_ctrl_iface_process(const char *msg)
 	}
 
 	if (!cfg.athnewind &&
-	    ((os_strncmp(start, "CTRL-EVENT-SCAN-STARTED ", 24) == 0) ||
+	     ((os_strncmp(start, "CTRL-EVENT-PRE-CONNECTING ", 26) == 0) ||
+	     (os_strncmp(start, "CTRL-EVENT-SCAN-STARTED ", 24) == 0) ||
 	     (os_strncmp(start, "AUTHENTICATING", 14) == 0))) {
 		/* Targeted disable: only AP endpoints whose radios appear
 		 * in STA GET_FREQ_LIST
@@ -974,9 +983,9 @@ static void mld_wpa_s_ctrl_iface_process(const char *msg)
 		}
 	} else if (cfg.athnewind &&
 		   (os_strncmp(start,
-			       "CTRL-EVENT-PRE-AUTHENTICATING ",
-			       30) == 0)) {
-		const char *kv = start + 30;
+			       "CTRL-EVENT-PRE-CONNECTING ",
+			       26) == 0)) {
+		const char *kv = start + 26;
 		while (*kv == ' ')
 			kv++;
 
@@ -1091,8 +1100,8 @@ static void mld_hostapd_ctrl_iface_process(struct wpa_ctrl *src_ctrl,
 	}
 
 	if (cfg.athnewind &&
-	    (os_strncmp(start, "AP-CSA-FINISHED ", 16) == 0)) {
-		const char *kv = start + 16;
+		(os_strncmp(start, "CTRL-EVENT-CHANNEL-SWITCH ", 26) == 0)) {
+		const char *kv = start + 26;
 		int is_dfs = 0;
 
 		while (*kv == ' ')
@@ -1157,12 +1166,19 @@ static void mld_hostapd_ctrl_iface_process(struct wpa_ctrl *src_ctrl,
 					cfg.sta_vap.sta_ctrl, sw_done,
 					strlen(sw_done), reply,
 					&rlen, NULL);
-				rptr_mgr_printf(
+				if (ret) {
+					rptr_mgr_printf(
+					"buf = %s cmd failed ret = %d",
+					sw_done, ret);
+					return;
+				} else {
+					rptr_mgr_printf(
 					"  -> notified STA %s ret=%d "
 					"(all CSA finished for hw_idx=%d) "
 					"msg=\"%s\"\n",
 					cfg.sta_vap.ifname, ret,
 					hw_idx, sw_done);
+				}
 			}
 			cfg.pre_auth_active[hw_idx] = 0;
 		}
@@ -1192,10 +1208,17 @@ static void mld_hostapd_ctrl_iface_process(struct wpa_ctrl *src_ctrl,
 					cfg.sta_vap.sta_ctrl, sw_done,
 					strlen(sw_done), reply,
 					&rlen, NULL);
-				rptr_mgr_printf(
+				if (ret) {
+					rptr_mgr_printf(
+					"buf = %s cmd failed ret = %d",
+					sw_done, ret);
+					return;
+				} else {
+					rptr_mgr_printf(
 					"  -> notified STA %s ret=%d "
 					"(DFS-CAC-COMPLETED) msg=\"%s\"\n",
 					cfg.sta_vap.ifname, ret, sw_done);
+				}
 				cfg.csa_bitmap[hw_idx] = 0;
 			} else {
 				rptr_mgr_printf(
@@ -1423,7 +1446,7 @@ void rptr_mgr_initialize_sock_for_ap(void)
 						"if=%s fd=%d",
 						link_ifname, link_fd);
 					eloop_register_read_sock(
-						link_fd, ap_link_sock_handler,
+						link_fd, ap_sock_handler,
 						NULL,
 						cfg.ap_vaps[i].links[j].link_ctrl);
 					(void) query_and_store_hw_info(

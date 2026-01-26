@@ -14,7 +14,7 @@
 struct wpa_ctrl;
 
 #define MAX_MLD_AP_VAPS          16
-#define MAX_MLD_LINKS_PER_AP      3
+#define MAX_MLD_LINKS_PER_AP      4
 #define MAX_MLD_STA_VAPS          1
 #define IFNAMSIZE 32
 
