@@ -955,6 +955,11 @@ static void parse_signal_poll_and_enable_rep_ap(void)
  */
 static void mld_wpa_s_ctrl_iface_process(const char *msg)
 {
+	char links[512];
+	char *ctx = NULL;
+	char *link_tok;
+	char *copy;
+
 	 /* Skip optional priority prefix like "<3>" */
 	const char *start = msg;
 	if (start && start[0] == '<') {
@@ -989,56 +994,83 @@ static void mld_wpa_s_ctrl_iface_process(const char *msg)
 		while (*kv == ' ')
 			kv++;
 
-		int hw_idx = parse_kv_int(kv, "hw_idx", -1);
-		int freq = parse_kv_int(kv, "freq", 0);
-		int c_freq1 = parse_kv_int(kv, "c_freq1", 0);
-		int c_freq2 = parse_kv_int(kv, "c_freq2", -1);
-		int width = parse_kv_int(kv, "width", 0);
-		int punc_bitmap = parse_kv_int(kv, "punc_bitmap", 0);
-		int is_dfs = parse_kv_int(kv, "is_dfs", 0);
-		char ifname[IFNAMSIZE];
-		parse_kv_token(kv, "ifname", ifname, sizeof(ifname));
-
-		int bandwidth = 20;
-		switch (width) {
-		case 1:
-			bandwidth = 20;
-			break;
-		case 2:
-			bandwidth = 40;
-			break;
-		case 3:
-			bandwidth = 80;
-			break;
-
-		case 4:
-			bandwidth = 80+80;
-			break;
-
-		case 5:
-			bandwidth = 160;
-			c_freq1 = c_freq2;
-			c_freq2 = 0;
-			break;
-		case 10:
-			bandwidth = 320;
-			c_freq1 = c_freq2;
-			c_freq2 = 0;
-			break;
-		default:
-			bandwidth = 20;
-			break;
-		}
-
-		int sec_channel_offset = calc_sec_channel_offset(
-			freq, c_freq1, bandwidth);
-		/* Delegate common CHAN_SWITCH handling; set CSA bitmap
-		 * for PRE-AUTH
+		/*
+		 * One PRE-CONNECTING per MLD, with all
+		 * link information aggregated in a single "links" key
+		 * as a semicolon-separated list of tuples:
+		 *   hw_idx,freq,c_freq1,c_freq2,width,punc_bitmap,is_dfs
 		 */
-		handle_chan_switch_event(freq, c_freq1, c_freq2,
-					bandwidth, sec_channel_offset,
-					hw_idx, punc_bitmap,
-					is_dfs, 1);
+		parse_kv_token(kv, "links", links, sizeof(links));
+		if (links[0]) {
+			copy = strdup(links);
+
+			if (!copy)
+				return;
+
+			link_tok = strtok_r(copy, ";", &ctx);
+			while (link_tok) {
+				int hw_idx, freq, c_freq1, c_freq2;
+				int width, punc_bitmap, is_dfs;
+				int bandwidth = 20;
+				int sec_channel_offset;
+				int offset_mhz = 0;
+
+				if (sscanf(link_tok, "%d,%d,%d,%d,%d,%d,%d",
+					   &hw_idx, &freq, &c_freq1, &c_freq2,
+					   &width, &punc_bitmap, &is_dfs) == 7) {
+					switch (width) {
+					case 1:
+						bandwidth = 20;
+						if (freq >= 2412 && freq <= 2472) {
+							c_freq1 = freq;
+						}
+						break;
+					case 2:
+						bandwidth = 40;
+						if (freq >= 2412 && freq <= 2472) {
+							offset_mhz =
+							(freq <= 2442) ? 10 : -10;
+							c_freq1 = freq + offset_mhz;
+						}
+						break;
+					case 3:
+						bandwidth = 80;
+						break;
+					case 4:
+						bandwidth = 80+80;
+						break;
+					case 5:
+						bandwidth = 160;
+						c_freq1 = c_freq2;
+						c_freq2 = 0;
+						break;
+					case 10:
+						bandwidth = 320;
+						c_freq1 = c_freq2;
+						c_freq2 = 0;
+						break;
+					default:
+						bandwidth = 20;
+						break;
+					}
+
+					sec_channel_offset = calc_sec_channel_offset(
+						freq, c_freq1, bandwidth);
+					/* Delegate common CHAN_SWITCH handling; set
+					 * CSA bitmap for PRE-AUTH per link
+					 */
+					handle_chan_switch_event(freq, c_freq1, c_freq2,
+								bandwidth,
+								sec_channel_offset,
+								hw_idx,
+								punc_bitmap,
+								is_dfs, 1);
+				}
+
+				link_tok = strtok_r(NULL, ";", &ctx);
+			}
+			free(copy);
+		}
 
 	} else if ((os_strncmp(start,
 			       "CTRL-EVENT-STARTED-CHANNEL-SWITCH ",
