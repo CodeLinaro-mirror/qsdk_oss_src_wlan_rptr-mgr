@@ -1,4 +1,6 @@
-OBJS_c = main.o mld_chan.o mld_ctrl.o ucode.o ubus.o $(STAGING_DIR)/usr/lib/libwpa_ctrl.a
+OBJS_c = main.o mld_chan.o mld_ctrl.o ucode.o ubus.o \
+	$(STAGING_DIR)/usr/lib/libwpa_ctrl.a \
+	$(WPA_PATH)/utils/uloop.o
 
 
 CC ?= $(TARGET_CC)
