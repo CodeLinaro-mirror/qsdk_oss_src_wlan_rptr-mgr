@@ -77,7 +77,7 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 	int hw_idx;
 	int pos = snprintf(base, sizeof(base),
 		"CHAN_SWITCH 10 %d center_freq1=%d bandwidth=%d "
-		"sec_channel_offset=%d skip_cac=%d",
+		"sec_channel_offset=%d skip_cac=%d rptr_mgr=1",
 		freq, c_freq1, bandwidth,
 		sec_channel_offset, skip_cac);
 	if (c_freq2 > 0 && pos < (int) sizeof(base))
@@ -91,7 +91,7 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 		hw_idx_override : wpa_get_hw_idx_by_freq(freq);
 	rptr_mgr_printf(
 		"CHAN_SWITCH cmd='%s' hw_idx=%d freq=%d "
-		"cf1=%d cf2=%d bw=%d sec_off=%d skip_cac=%d",
+		"cf1=%d cf2=%d bw=%d sec_off=%d skip_cac=%d rptr_mgr=1",
 		base, hw_idx, freq, c_freq1, c_freq2,
 		bandwidth, sec_channel_offset, skip_cac);
 
