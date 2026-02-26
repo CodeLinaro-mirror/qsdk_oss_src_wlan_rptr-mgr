@@ -1263,6 +1263,23 @@ static void mld_hostapd_ctrl_iface_process(struct wpa_ctrl *src_ctrl,
 	}
 }
 
+void print_rptr_interfaces(struct mld_config *cfg)
+{
+	rptr_mgr_printf("STA VAP: %s", cfg->sta_vap.ifname);
+	for (int i = 0; i < cfg->ap_vap_count; i++) {
+		rptr_mgr_printf("AP VAP %d: %s", i,
+				cfg->ap_vaps[i].ifname);
+		for (int j = 0; j < cfg->ap_vaps[i].link_count; j++) {
+			rptr_mgr_printf("  Link %d: %s", j,
+					cfg->ap_vaps[i].links[j].ifname);
+		}
+	}
+
+	rptr_mgr_printf("cfg->rptr_mgr_comm_type = %d cfg->athnewind = %d "
+			"cfg->skip_cac = %d", cfg->rptr_mgr_comm_type,
+			cfg->athnewind, cfg->skip_cac);
+}
+
 /*
  * parse_update_mld_config - Parse the rptr_mgr conf and store them in global cfg
  *
@@ -1319,33 +1336,6 @@ int parse_update_mld_config(struct mld_config *cfg)
 
 	cfg->ap_vap_count = ap_index + 1;
 	fclose(fp);
-
-	rptr_mgr_printf("STA VAP: %s", cfg->sta_vap.ifname);
-	for (int i = 0; i < cfg->ap_vap_count; i++) {
-		rptr_mgr_printf("AP VAP %d: %s", i,
-				cfg->ap_vaps[i].ifname);
-		for (int j = 0; j < cfg->ap_vaps[i].link_count; j++) {
-			rptr_mgr_printf("  Link %d: %s", j,
-					cfg->ap_vaps[i].links[j].ifname);
-		}
-	}
-
-	rptr_mgr_printf(
-	    " cfg->rptr_mgr_comm_type = %d cfg->athnewind = %d "
-	    "cfg->skip_cac = %d",
-	    cfg->rptr_mgr_comm_type, cfg->athnewind, cfg->skip_cac);
-
-	switch (cfg->rptr_mgr_comm_type) {
-		case 1:
-			rptr_mgr_printf(
-		    "The rptr_mgr communication type is using UBUS");
-			break;
-		case 2:
-			 rptr_mgr_printf(
-		    "The rptr_mgr communication type is using socket");
-			break;
-	}
-
 	return 0;
 }
 
@@ -1551,6 +1541,7 @@ int main(int argc, char *argv[])
 	} else if (cfg.rptr_mgr_comm_type == 2) {
 		/* Socket-based communication */
 		rptr_mgr_printf("initializing rptr_mgr Sock mode");
+		print_rptr_interfaces(&cfg);
 		rptr_mgr_initialize_sock_for_ap();
 		rptr_mgr_initialize_sock_for_sta();
 	} else {
