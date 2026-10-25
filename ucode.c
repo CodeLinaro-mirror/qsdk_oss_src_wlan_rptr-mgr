@@ -132,7 +132,7 @@ int rptr_mgr_ucode_call_prepare(const char *fname)
 		return -1;
 
 	func = ucv_object_get(obj, fname, NULL);
-	if (!ucv_is_callable(func))
+	if (!func || !ucv_is_callable(func))
 		return -1;
 
 	uc_vm_stack_push(vm, ucv_get(obj));
@@ -145,12 +145,27 @@ uc_value_t *rptr_mgr_ucode_global_init(const char *name, uc_resource_type_t *glo
 {
 	uc_value_t *global = uc_resource_new(global_type, NULL);
 	uc_value_t *proto;
+	uc_value_t *scope;
+
+	if (!global)
+		return NULL;
+
+	proto = ucv_prototype_get(global);
+	if (!proto) {
+		ucv_put(global);
+		return NULL;
+	}
+
+	scope = uc_vm_scope_get(&rptr_mgr_vm);
+	if (!scope) {
+		ucv_put(global);
+		return NULL;
+	}
 
 	uc_vm_registry_set(&rptr_mgr_vm, "rptr_mgr.global", global);
-	proto = ucv_prototype_get(global);
 	ucv_object_add(proto, "data", ucv_get(ucv_object_new(&rptr_mgr_vm)));
 
-	ucv_object_add(uc_vm_scope_get(&rptr_mgr_vm), name, ucv_get(global));
+	ucv_object_add(scope, name, ucv_get(global));
 
 	return global;
 }
@@ -233,6 +248,8 @@ int rptr_mgr_ucode_init(ifacemgr_hdl_t *ifacemgr_handle)
 	iface_registry = ucv_array_new(vm);
 	uc_vm_registry_set(vm, "rptr_mgr.iface_registry", iface_registry);
 	global = rptr_mgr_ucode_global_init("rptr_mgr", global_type);
+	if (!global)
+		goto free_vm;
 
 
 	if (rptr_mgr_ucode_run(IFACE_MGR_UC_PATH "rptr_mgr.uc"))
