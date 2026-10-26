@@ -964,6 +964,11 @@ static void mld_wpa_s_ctrl_iface_process(const char *msg)
 	char *link_tok;
 	char *copy;
 
+	if (!msg) {
+		rptr_mgr_printf("mld_wpa_s_ctrl_iface_process: NULL msg\n");
+		return;
+	}
+
 	 /* Skip optional priority prefix like "<3>" */
 	const char *start = msg;
 	if (start && start[0] == '<') {
@@ -1125,8 +1130,13 @@ static void mld_wpa_s_ctrl_iface_process(const char *msg)
  *   Independent Repeater scenario to resume the Rep STA Authentication
  */
 static void mld_hostapd_ctrl_iface_process(struct wpa_ctrl *src_ctrl,
-			      const char *msg)
+				      const char *msg)
 {
+	if (!msg) {
+		rptr_mgr_printf("mld_hostapd_ctrl_iface_process: NULL msg\n");
+		return;
+	}
+
 	/* Normalize message start by skipping optional "<N>" prefix */
 	const char *start = msg;
 	if (start && start[0] == '<') {
