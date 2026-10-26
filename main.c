@@ -64,9 +64,9 @@ static void mld_hostapd_ctrl_iface_process(struct wpa_ctrl *src_ctrl, const char
  *  - set_bitmap: whether to mark CSA bits for aggregation
  */
 static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
-			 int bandwidth, int sec_channel_offset,
-			 int hw_idx_override, int punc_bitmap,
-			 int is_dfs, int set_bitmap)
+				 int bandwidth, int sec_channel_offset,
+				 int hw_idx_override, int punc_bitmap,
+				 int is_dfs, int set_bitmap)
 {
 	char base[256];
 	int skip_cac = is_dfs && cfg.skip_cac;
@@ -75,6 +75,7 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 	char send_ifname[IFNAMSIZE] = { 0 };
 	int same = 1;
 	int hw_idx;
+	int track_csa;
 	int pos = snprintf(base, sizeof(base),
 		"CHAN_SWITCH 10 %d center_freq1=%d bandwidth=%d "
 		"sec_channel_offset=%d skip_cac=%d rptr_mgr=1",
@@ -89,11 +90,16 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 
 	hw_idx = hw_idx_override >= 0 ?
 		hw_idx_override : wpa_get_hw_idx_by_freq(freq);
+	track_csa = set_bitmap &&
+		hw_idx >= 0 && hw_idx < MAX_MLD_LINKS_PER_AP;
 	rptr_mgr_printf(
 		"CHAN_SWITCH cmd='%s' hw_idx=%d freq=%d "
 		"cf1=%d cf2=%d bw=%d sec_off=%d skip_cac=%d rptr_mgr=1",
 		base, hw_idx, freq, c_freq1, c_freq2,
 		bandwidth, sec_channel_offset, skip_cac);
+	if (set_bitmap && !track_csa)
+		rptr_mgr_printf("invalid hw_idx=%d; skip CSA bitmap tracking",
+				hw_idx);
 
 	for (int i = 0; i < cfg.ap_vap_count; i++) {
 		if (cfg.ap_vaps[i].link_count == 0) {
@@ -106,7 +112,7 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 				continue;
 
 			/* Set bitmap for this AP since it matches */
-			if (set_bitmap && hw_idx >= 0)
+			if (track_csa)
 				cfg.csa_bitmap[hw_idx] |= BIT(i);
 
 			same = same && chan_params_equal(&cfg.ap_vaps[i].ch_info,
@@ -160,7 +166,7 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 				}
 				/* Iterate all links to set bitmap for the AP */
 			}
-			if (link_matched && set_bitmap && hw_idx >= 0)
+			if (link_matched && track_csa)
 				cfg.csa_bitmap[hw_idx] |= BIT(i);
 		}
 	}
@@ -181,7 +187,7 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 			return;
 		}
 
-		if (set_bitmap && hw_idx >= 0)
+		if (track_csa)
 			rptr_mgr_printf(
 				"sent CHAN_SWITCH once to %s ret=%d "
 				"csa_bitmap=0x%x hw_idx=%d cmd='%s'",
@@ -192,7 +198,7 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 				"sent CHAN_SWITCH once to %s ret=%d "
 				"hw_idx=%d cmd='%s'",
 				 send_ifname, ret, hw_idx, cmd);
-		if (set_bitmap)
+		if (track_csa)
 			cfg.pre_auth_active[hw_idx] = 1;
 
 		/* Update stored params for the endpoint we sent to */
@@ -232,7 +238,7 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 		 * endpoints and all were same, send CHAN_SW_FINISHED_NOTIFY
 		 * to STA and clear pre-auth/bitmap.
 		 */
-		if (set_bitmap && same && cfg.csa_bitmap[hw_idx] &&
+		if (track_csa && same && cfg.csa_bitmap[hw_idx] &&
 		    cfg.sta_vap.sta_ctrl) {
 			char sw_done[64];
 			snprintf(sw_done, sizeof(sw_done),
@@ -247,17 +253,15 @@ static void handle_chan_switch_event(int freq, int c_freq1, int c_freq2,
 					       NULL);
 			if (ret) {
 				rptr_mgr_printf("buf = %d ret = %d",
-							sw_done, ret);
+						sw_done, ret);
 				return;
 			}
 			rptr_mgr_printf(
 				"no CHAN_SWITCH needed; notified STA %s "
 				"ret=%d msg='%s'",
 				 cfg.sta_vap.ifname, ret, sw_done);
-			if (hw_idx >= 0 && hw_idx < MAX_MLD_LINKS_PER_AP) {
-				cfg.csa_bitmap[hw_idx] = 0;
-				cfg.pre_auth_active[hw_idx] = 0;
-			}
+			cfg.csa_bitmap[hw_idx] = 0;
+			cfg.pre_auth_active[hw_idx] = 0;
 		} else {
 			rptr_mgr_printf(
 				"no eligible endpoint for CHAN_SWITCH (hw_idx=%d)",
