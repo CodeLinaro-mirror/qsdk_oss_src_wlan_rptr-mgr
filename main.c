@@ -818,8 +818,8 @@ static void parse_signal_poll_and_enable_rep_ap(void)
 		 * matching AP links
 		 */
 		char *copy = strdup(rbuf);
-		rptr_mgr_printf("\nMLO_SIGNAL_POLL: copy = %s", copy);
 		if (copy) {
+			rptr_mgr_printf("\nMLO_SIGNAL_POLL: copy = %s", copy);
 			int link_id = -1;
 			int rssi = 0, noise = 0;
 			int freq = 0, linkspeed = 0;
@@ -892,6 +892,9 @@ static void parse_signal_poll_and_enable_rep_ap(void)
 						avg_rssi);
 			}
 			free(copy);
+		} else {
+			rptr_mgr_printf("MLO_SIGNAL_POLL: strdup failed; "
+					"skipping parse\n");
 		}
 	} else {
 		/* Fallback to legacy SIGNAL_POLL */
